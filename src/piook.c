@@ -69,6 +69,9 @@ void handleInterrupt()
     duration = time - lastTime;
     lastTime = time;
 
+    // ENHANCEMENT: The below logic relies on a noise pulse to trigger attempted decoding of a received message; we should attempt decode 
+    // upon reception of enough bits and perhaps use a circular buffer.
+    
     // Decode pulse.
     int code = decodePulse(highLow, duration);
     if(0 == code)
@@ -237,7 +240,7 @@ void processSequence(int preambleIdx)
 * derived from the OneWire Arduino library. Modifications to
 * the polynomial according to Fine Offset's CRC8 calulations.
 */
-uint8_t crc8( uint8_t *addr, uint8_t len)
+uint8_t crc8(uint8_t *addr, uint8_t len)
 {
     uint8_t crc = 0;
 
