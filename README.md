@@ -112,17 +112,17 @@ The message format is as follows:
 byte# |nibble# | designation
 ----- | ------ | ----------- 
 0     | 0 | Fixed preamble 0xF
-      | 1 | Fixed preamble 0xF
+0     | 1 | Fixed preamble 0xF
 1     | 2 | Fixed preamble 0x8
-      | 3 | Random code/ID (1st nibble)
+1     | 3 | Random code/ID (1st nibble)
 2     | 4 | Random code/ID (2nd nibble)
-      | 5 | Temperature (1st nibble)
+2     | 5 | Temperature (1st nibble)
 3     | 6 | Temperature (2nd nibble)
-      | 7 | Temperature (3rd nibble)
+3     | 7 | Temperature (3rd nibble)
 4     | 8 | Humidity (1st nibble)
-      | 9 | Humidity (2nd nibble)
+4     | 9 | Humidity (2nd nibble)
 5     | 10| Checksum (1st nibble)
-      | 11| Checksum (2nd nibble)
+5     | 11| Checksum (2nd nibble)
 
 Notes.
 
