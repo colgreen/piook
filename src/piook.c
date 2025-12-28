@@ -175,12 +175,13 @@ int scanForPreamble()
 {
     static int preambleSeq[8] = {1, 1, 1, 1, 2, 1, 2, 2};
 
-    for(int i=0; i<_bitIdx-8; i++)
+    for(int i = 0; i < _bitIdx-8; i++)
     {
-        int j=0;
-        for(; j<8 && _bitBuff[j+i] == preambleSeq[j]; j++);
+        int j = 0;
+        for(; j < 8 && _bitBuff[j+i] == preambleSeq[j]; j++)
+            ;
                 
-        if(8==j) {
+        if(8 == j) {
             return i;
         }
     }
@@ -195,14 +196,14 @@ void processSequence(int preambleIdx)
     uint8_t data[dataLen];
     int idx = preambleIdx;
 
-    for(int i=0; i<dataLen; i++)
+    for(int i = 0; i<dataLen; i++)
     {
         uint8_t b = 0;
         uint8_t mask = 0x80;
 
-        for(int j=0; j<8; j++, idx++)
+        for(int j = 0; j < 8; j++, idx++)
         {
-            if(1==_bitBuff[idx]) {
+            if(1 == _bitBuff[idx]) {
                 b += mask;
             }
             mask = mask >> 1;
@@ -311,7 +312,7 @@ void printHex(uint8_t* buf, int len)
     const char* hex = "0123456789ABCDEF";
     char* pout = str;
     int i = 0;
-    for(; i < len-1; ++i){
+    for(; i < len - 1; ++i){
         *pout++ = hex[(*pin>>4)&0xF];
         *pout++ = hex[(*pin++)&0xF];
         *pout++ = ':';
