@@ -126,6 +126,7 @@ void handleEvent(int highLow, unsigned long timeMicros)
         {
             // Pulse train too long - reset buffer
             g_bitIndex = 0;
+            prevPulse = PULSE_NOISE;
             return;
         }
 
@@ -251,6 +252,11 @@ void processSequence(size_t preambleIdx)
         return;
     }
 
+    // Safety check: ensure we won't overflow the data buffer
+    if (idx + (dataLen * 8) > g_bitIndex) {
+        return;  // Not enough data in buffer
+    }
+
     // Convert pulse types to binary data (8 pulses = 1 byte)
     for(size_t i = 0; i < dataLen; i++)
     {
@@ -338,7 +344,7 @@ uint8_t crc8(const uint8_t *data, uint8_t len)
             byte <<= 1;
         }
     }
-    
+
     return crc;
 }
 

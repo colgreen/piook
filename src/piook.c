@@ -85,6 +85,7 @@ int main(int argc, char *argv[])
     // Configure line for both rising and falling edge events
     if (gpiod_line_request_both_edges_events(line, "piook") < 0) {
         perror("gpiod_line_request_both_edges_events");
+        gpiod_line_release(line);
         gpiod_chip_close(chip);
         exit(1);
     }
@@ -171,17 +172,26 @@ void parseOptions(int argc, char *argv[])
             case 'p':
                 {
                     char *endptr;
-                    g_pinNumber = strtol(optarg, &endptr, 10);
-                    if (*endptr != '\0' || g_pinNumber < 0 || g_pinNumber > 53) {
-                        fprintf(stderr, "Invalid GPIO pin number: %s\n", optarg);
+                    long pin_val = strtol(optarg, &endptr, 10);
+                    if (*endptr != '\0' || pin_val < 0 || pin_val > 63) {
+                        fprintf(stderr, "Invalid GPIO pin number: %s (must be 0-63)\n", optarg);
                         exit(1);
                     }
+                    g_pinNumber = (int)pin_val;
                 }
                 break;
             case 'o':
+                if (!optarg || strlen(optarg) == 0) {
+                    fprintf(stderr, "Error: Output filename cannot be empty\n");
+                    exit(1);
+                }
                 g_outputFilename = optarg;
                 break;
             case 'c':
+                if (!optarg || strlen(optarg) == 0) {
+                    fprintf(stderr, "Error: GPIO chip name cannot be empty\n");
+                    exit(1);
+                }
                 g_chipName = optarg;
                 break;
             case '?':
@@ -225,7 +235,7 @@ void printHelp()
     printf("\nOptions:\n");
     printf("  -h, --help                 Show this help message\n");
     printf("  -v, --verbose              Enable verbose output\n");
-    printf("  -p, --pin PIN              GPIO line number (default: 7)\n");
+    printf("  -p, --pin PIN              GPIO line number (0-63, default: 7)\n");
     printf("  -o, --output FILE          Output filename (required)\n");
     printf("  -c, --chip CHIP            GPIO chip name (default: gpiochip0)\n");
     printf("\nExamples:\n");
@@ -238,5 +248,6 @@ void printHelp()
     printf(" * Valid sequences are decoded to a temperature in Centigrade, and a relative humidity (RH%%) value.\n");
     printf(" * Decoded data is written to the output file in the format: temp,RH\n");
     printf(" * Each update overwrites the previous file; the file will contain the most recent reading.\n");
+    printf(" * Example output: 23.45,65\n");
     printf(" * Project URL: http://github.com/colgreen/piook\n");
 }
