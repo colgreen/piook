@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include "piook.h"
 
-#define __maxBits 128
+#define MAX_BIT_COUNT 128
 
 // GPIO Pin to monitor.
 int _pinNum = 7;
@@ -71,7 +71,7 @@ We record received 'pulses'; there are three kinds of pulse:
 3 - 'on' pulse. 
 0 - Represents a 'noise' pulse.
 =============================================================*/
-int _bitBuff[__maxBits+1];
+int _bitBuff[MAX_BIT_COUNT+1];
 int _bitIdx = 0;
 
 void handleEvent(int highLow, unsigned long timeMicros)
@@ -115,7 +115,7 @@ void handleEvent(int highLow, unsigned long timeMicros)
         }
 
         // 'Off' pulse received.
-        if(_bitIdx >= __maxBits)
+        if(_bitIdx >= MAX_BIT_COUNT)
         {   // Pulse train is longer than expected. Reset buffer.
             _bitIdx = 0;
             return;
