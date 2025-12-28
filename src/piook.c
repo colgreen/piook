@@ -13,12 +13,29 @@
 #include <time.h>
 #include <gpiod.h>
 #include <unistd.h>
+#include <signal.h>
 #include "piook.h"
 
 /** GPIO pin number to monitor (kernel/BCM offset for gpiochip0) */
 int g_pinNumber = 7;
 /** Output filename for decoded weather data */
 char* g_outputFilename;
+
+/** Global flag for graceful shutdown */
+volatile sig_atomic_t g_keepRunning = 1;
+
+/**
+ * @brief Signal handler for graceful shutdown.
+ *
+ * Sets the global flag to stop the main event loop.
+ *
+ * @param signum Signal number (unused)
+ */
+void signalHandler(int signum)
+{
+    (void)signum; // Suppress unused parameter warning
+    g_keepRunning = 0;
+}
 
 /**
  * @brief Main entry point for the piook application.
@@ -32,6 +49,10 @@ char* g_outputFilename;
  */
 int main(int argc, char *argv[])
 {
+    // Set up signal handlers for graceful shutdown
+    signal(SIGINT, signalHandler);  // Ctrl+C
+    signal(SIGTERM, signalHandler); // kill command
+
     // Parse command-line arguments to get GPIO pin and output file
     parseOptions(argc, argv);
 
@@ -63,7 +84,14 @@ int main(int argc, char *argv[])
 
     // Main event loop: wait for and process GPIO events
     printf("Starting event loop, waiting for GPIO events...\n");
+    printf("Press Ctrl+C to exit\n");
     for (;;) {
+        // Check if we should exit
+        if (!g_keepRunning) {
+            printf("\nShutting down gracefully...\n");
+            break;
+        }
+
         // Wait indefinitely for the next edge event
         int rv = gpiod_line_event_wait(line, NULL);
         if (rv < 0) {
@@ -90,6 +118,7 @@ int main(int argc, char *argv[])
     // Cleanup GPIO resources
     gpiod_line_release(line);
     gpiod_chip_close(chip);
+    printf("GPIO resources cleaned up. Exiting.\n");
     return 0;
 }
 

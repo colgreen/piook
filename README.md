@@ -4,78 +4,118 @@ Raspberry Pi On-Off Keying (OOK) Decoder for the ClimeMET Weather Station, model
 ## Overview
 
 piook is a small program for the [Raspberry Pi](https://en.wikipedia.org/wiki/Raspberry_Pi) computer that will decode radio transmissions
-from a ClimeMET weather station remote module, in conjuntion with a cheap 433MHz radio receiver module wired to one the Raspberry Pi's
+from a ClimeMET weather station remote module, in conjunction with a cheap 433MHz radio receiver module wired to one of the Raspberry Pi's
 GPIO pins.
 
+**Note**: This version has been updated to use [libgpiod](https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/) instead of the deprecated wiringPi library.
 
 ### CliMET Weather Station
 
 The [CliMET CM9088 Weather Station](https://www.climemet.com/products/cm9088-temperature-and-humidity-forecast-station) consists of two items;
-an indoor module with an LCD display, and a remote/outdoor module (part number [CM7-TX](https://www.climemet.com/products/cm7-tx-temperature-transmitter)
+an indoor module with an LCD display, and a remote/outdoor module (part number [CM7-TX](https://www.climemet.com/products/cm7-tx-temperature-transmitter))
 for mounting on an outside wall for taking readings of the external temperature and [relative humidity](https://en.wikipedia.org/wiki/Relative_humidity) (RH).
 
-The remote module periodically (approx. every minute) transmits a short burst of data to the main module for indoor display of the external readings. Radio 
+The remote module periodically (approx. every minute) transmits a short burst of data to the main module for indoor display of the external readings. Radio
 transmission occurs at 433Mhz using [on-off keying](https://en.wikipedia.org/wiki/On-off_keying), a crude but simple data transmission scheme in which the
 transmitter is simply switched on and off very quickly with well defined off intervals defining the binary bits of the data sequence to transmit.
 
 
 ### 433MHz Radio Receivers
 
-433MHz is a standard band for low power transmission; devices using [on-off keying](https://en.wikipedia.org/wiki/On-off_keying) 
-on this band are common e.g. wireless doorbells, thermostats and electricty meters typically use this band. As such cheap 433MHz
+433MHz is a standard band for low power transmission; devices using [on-off keying](https://en.wikipedia.org/wiki/On-off_keying)
+on this band are common e.g. wireless doorbells, thermostats and electricity meters typically use this band. As such cheap 433MHz
 receiver and transmitter modules are widely available.
 
-I initially attempted this project using the widely available and very cheap [XY-MK-5V](http://www.guillier.org/blog/2014/10/new-rf-433mhz-receiver/) 
-receivers, which appear to be a simple regenerative or superregenerative type receiver; a primitive circuit with low sensitivity and selectivity, 
+I initially attempted this project using the widely available and very cheap [XY-MK-5V](http://www.guillier.org/blog/2014/10/new-rf-433mhz-receiver/)
+receivers, which appear to be a simple regenerative or superregenerative type receiver - a primitive circuit with low sensitivity and selectivity,
 and indeed I was unable to get these to receive a clean signal beyond about 5 meters from the transmitter.
 
-Web research lead to the [RXB6](http://www.guillier.org/blog/2014/10/new-rf-433mhz-receiver/), a superior superheterodyne type 433MHz receiver module.
+Web research lead to the [RXB6](http://www.guillier.org/blog/2014/10/new-rf-433mhz-receiver/), a superior superheterodyne type 433MHz receiver module; this module allows reception of the OOK signal inside the house from the outdoor module located maybe < 20 meters away.
 
 
 ### Connecting to a Raspberry Pi
 
 Both the XY-MK-5V and RXB6 have simple physical interfaces consisting of +5V and ground connectors for power, and a single data/signal connector
-that should typically by wired to the positive power rail via a [pull up resistor](https://en.wikipedia.org/wiki/Pull-up_resistor) to prevent 
+that should typically by wired to the positive power rail via a [pull up resistor](https://en.wikipedia.org/wiki/Pull-up_resistor) to prevent
 a floating voltage on the data line; I used a 10k Ohm resistor for this.
 
-The data line can then be connected to one of the Raspberry Pi's GPIO pins which we can interface to in software using the very handy 
-[wiringPi](http://wiringpi.com/) project.
+The data line can then be connected to one of the Raspberry Pi's GPIO pins which we can interface to in software using [libgpiod](https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/).
 
 
-### Compiling piook
+### Dependencies
 
-piook consists of just piook.c and associated header file, piook.h. The only non-standard dependency is wiringPi, for which installation instructions
-can be found at http://wiringpi.com/download-and-install/. Briefly though the steps are:
+This version requires libgpiod. On Raspberry Pi OS/Debian/Ubuntu:
 
-First check if wiringPi is already installed with:
+```bash
+sudo apt update
+sudo apt install libgpiod-dev
+```
 
-    gpio -v
+On other distributions, install libgpiod from your package manager or build from source.
 
-If not then:
 
-    git clone git://git.drogon.net/wiringPi
-    cd ~/wiringPi
-    git pull origin
-    ./build
+### Building piook
 
-The compiled library will be installed in the relevant system library folder, so from now on we can link to wiringPi with a `-lwiringPi` option 
-passed to gcc or g++.
+piook consists of three files: `piook.c`, `decoder.c`, and `piook.h`. The only dependency is libgpiod.
 
-To compile piook run the following command in the folder containing piook.c:
+#### Using Make (recommended)
 
-    g++ piook.c -lwiringPi -O3 -o piook
+```bash
+make
+```
 
-The -O3 option is optional, this is the highest compiler optimisation level.
+This will build the `piook` executable.
+
+#### Manual compilation
+
+```bash
+gcc -Wall -Wextra -O2 -std=c99 src/piook.c src/decoder.c -lgpiod -o piook
+```
+
+#### Installation
+
+To install system-wide (requires root):
+
+```bash
+sudo make install
+```
+
+To uninstall:
+
+```bash
+sudo make uninstall
+```
 
 
 ### Running piook (Usage)
 
 Usage:
 
-    piook pinNumber outfile
+    piook gpioLine outfile
 
-pinNumber: GPIO pin number to listen on. Based on the wiringPi 'simplified' pin numbering scheme (see http://wiringpi.com/pins/)
+gpioLine: GPIO line number (kernel/BCM offset for gpiochip0) to listen on.
 
+outfile: filename to write data to.
+
+Notes:
+ * Must be called with privileges to access /dev/gpiochip* (usually root or gpio group).
+ * piook will listen on the specified gpio line for valid OOK sequences being received by the attached radio module.
+ * Valid sequences are decoded to a temperature (in Centigrade), and a relative humidity (RH%) value.
+ * Temperature has range -204.7 to +204.7, and precision of 0.1.
+ * Relative humidity has range 0-100, and precision of 1.0.
+ * The decoded data is written to the output file in the format: temp,RH with a newline (\n) terminator.
+ * Each received transmission overwrites the previous file, i.e. the file will always contain a single line
+   containing the most recently received data.
+ * Project URL: http://github.com/colgreen/piook
+
+
+### Data Modulation
+
+Usage:
+
+    piook gpioLine outfile
+
+gpioLine: GPIO line number (kernel/BCM offset for gpiochip0) to listen on.
 
 outfile: filename to write data to.
 
