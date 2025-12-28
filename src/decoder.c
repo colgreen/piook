@@ -310,37 +310,17 @@ void processSequence(size_t preambleIdx)
 /**
  * @brief Calculates CRC-8 checksum for data validation.
  *
- * Implements CRC-8 algorithm adapted from the OneWire Arduino library,
- * with modifications for Fine Offset's CRC8 calculations used by CliMET.
+ * Function taken from Luc Small (http://lucsmall.com), itself derived from
+ * the OneWire Arduino library. Modifications to the polynomial according to
+ * Fine Offset's CRC8 calculations used by CliMET.
  *
- * @param addr Pointer to data buffer
+ * @param data Pointer to data buffer
  * @param len Length of data in bytes
  * @return Calculated CRC-8 checksum
  *
  * @note Based on Luc Small's work (http://lucsmall.com), derived from OneWire library.
  *       Polynomial modified for Fine Offset compatibility.
  */
-// uint8_t crc8(uint8_t *addr, uint8_t len)
-// {
-//     uint8_t crc = 0;
-//     uint8_t i;
-
-//     // Process each byte
-//     while (len--) {
-//         crc ^= *addr++;
-//         // Process each bit in the byte
-//         for (i = 8; i > 0; --i) {
-//             if (crc & 0x80) {
-//                 crc = (crc << 1) ^ 0x31;  // Polynomial 0x31
-//             } else {
-//                 crc = (crc << 1);
-//             }
-//         }
-//     }
-
-//     return crc;
-// }
-
 uint8_t crc8(const uint8_t *data, uint8_t len)
 {
     static const uint8_t POLY = 0x31;  // x^8 + x^5 + x^4 + 1 (CRC-8/Dallas uses 0x31 in normal form)
@@ -358,6 +338,7 @@ uint8_t crc8(const uint8_t *data, uint8_t len)
             byte <<= 1;
         }
     }
+    
     return crc;
 }
 
