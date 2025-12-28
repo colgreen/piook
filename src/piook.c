@@ -217,7 +217,13 @@ void processSequence(size_t preambleIdx)
 {
     // Convert the buffered bits into a byte array.
     size_t bitLen = g_bitIndex - preambleIdx;
-    size_t dataLen = bitLen / 8;
+    
+    // Ensure we have a complete number of bytes (multiple of 8 bits)
+    if (bitLen & 7) {
+        return;
+    }
+    
+    size_t dataLen = bitLen >> 3;
     uint8_t data[EXPECTED_DATA_LEN]; // Fixed size buffer.
     size_t idx = preambleIdx;
 
