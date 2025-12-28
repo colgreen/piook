@@ -7,6 +7,9 @@
 #include "piook.h"
 
 #define MAX_BIT_COUNT 128
+#define EXPECTED_DATA_LEN 5
+#define PREAMBLE_LEN 8
+#define PREAMBLE_SEQ {1, 1, 1, 1, 2, 1, 2, 2}
 
 // GPIO Pin to monitor.
 int _pinNum = 7;
@@ -71,7 +74,7 @@ We record received 'pulses'; there are three kinds of pulse:
 3 - 'on' pulse. 
 0 - Represents a 'noise' pulse.
 =============================================================*/
-int _bitBuff[MAX_BIT_COUNT+1];
+int _bitBuff[MAX_BIT_COUNT + 1];
 int _bitIdx = 0;
 
 void handleEvent(int highLow, unsigned long timeMicros)
@@ -149,6 +152,7 @@ const unsigned int __offLongMuLower = __offLongMu - __jitterWindow;
 
 int decodePulse(int highLow, unsigned int duration)
 {
+    // Decode the pulse type based on signal level and duration
     if(0 == highLow)
     {
         // Test for short 'off' pulse.
@@ -173,15 +177,15 @@ int decodePulse(int highLow, unsigned int duration)
 // Scan the buffered pulses for the fixed preamble sequence.
 int scanForPreamble()
 {
-    static int preambleSeq[8] = {1, 1, 1, 1, 2, 1, 2, 2};
+    static int preambleSeq[PREAMBLE_LEN] = PREAMBLE_SEQ;
 
-    for(int i = 0; i < _bitIdx-8; i++)
+    for(int i = 0; i < _bitIdx - PREAMBLE_LEN; i++)
     {
         int j = 0;
-        for(; j < 8 && _bitBuff[j+i] == preambleSeq[j]; j++)
+        for(; j < PREAMBLE_LEN && _bitBuff[j + i] == preambleSeq[j]; j++)
             ;
                 
-        if(8 == j) {
+        if(PREAMBLE_LEN == j) {
             return i;
         }
     }
@@ -193,10 +197,15 @@ void processSequence(int preambleIdx)
     // Convert the buffered bits into a byte array.
     int bitLen = _bitIdx - preambleIdx;
     int dataLen = bitLen / 8;
-    uint8_t data[dataLen];
+    uint8_t data[EXPECTED_DATA_LEN]; // Fixed size buffer.
     int idx = preambleIdx;
 
-    for(int i = 0; i<dataLen; i++)
+    // Only process if we have the expected data length.
+    if (dataLen != EXPECTED_DATA_LEN) {
+        return;
+    }
+
+    for(int i = 0; i < dataLen; i++)
     {
         uint8_t b = 0;
         uint8_t mask = 0x80;
@@ -213,12 +222,6 @@ void processSequence(int preambleIdx)
 
     // For debugging only.
     //printHex(data, dataLen);
-
-    // Validation.
-    if(5 != dataLen)
-    {   // Reject.
-        return;
-    }
 
     // Calc checksum.
     uint8_t checksum = crc8(data, 4);
@@ -242,6 +245,10 @@ void processSequence(int preambleIdx)
     if(NULL != _outfilename)
     {
         FILE *f = fopen(_outfilename, "w");
+        if (!f) {
+            perror("Failed to open output file");
+            return;
+        }
         fprintf(f, "%3.2f,%d\n", tempCelsius, rh); 
         fclose(f);
         printf("Data written to file: Temp: %4.2f, RH: %d\n", tempCelsius, rh);
@@ -253,7 +260,7 @@ void processSequence(int preambleIdx)
 }
 
 /*
-* Function taken from Luc Small (http://lucsmall.com), itself
+* CRC-8 function taken from Luc Small (http://lucsmall.com), itself
 * derived from the OneWire Arduino library. Modifications to
 * the polynomial according to Fine Offset's CRC8 calculations.
 */
@@ -282,7 +289,12 @@ void parseOptions(int argc, char *argv[])
         exit(1);
     }
     // Note: _pinNum is the GPIO line offset for gpiochip0 (kernel/BCM numbering)
-    _pinNum = atoi(argv[1]);
+    char *endptr;
+    _pinNum = strtol(argv[1], &endptr, 10);
+    if (*endptr != '\0' || _pinNum < 0 || _pinNum > 53) {
+        fprintf(stderr, "Invalid GPIO pin number: %s\n", argv[1]);
+        exit(1);
+    }
     _outfilename = argv[2];
 }
 
