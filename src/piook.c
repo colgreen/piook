@@ -2,40 +2,60 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <time.h>
-#include <wiringPi.h>
+#include <gpiod.h>
+#include <unistd.h>
 #include "piook.h"
 
 // GPIO Pin to monitor.
 int _pinNum = 7;
 char* _outfilename;
 
-int main(int argc, char *argv[]) 
+int main(int argc, char *argv[])
 {
     // Parse command line options.
     parseOptions(argc, argv);
 
-    struct timespec tim;
-    tim.tv_sec = 0;
-    tim.tv_nsec = 500000000L;
-
-    // Init GPIO and wiringPi using the wiringPi 'simplified' pin numbering scheme.
-    // Scheme is defined at http://wiringpi.com/pins/
-    // Note. Must be called with root privileges.
-    if(wiringPiSetup() == -1) 
-    {   // Init failed. wiringPi writes a message so just return an error code here.
+    const char *chipname = "gpiochip0"; // default gpiochip
+    struct gpiod_chip *chip = gpiod_chip_open_by_name(chipname);
+    if (!chip) {
+        perror("gpiod_chip_open_by_name");
         exit(1);
     }
 
-    // Hook-up interrupt service routine.
-    wiringPiISR(_pinNum, INT_EDGE_BOTH, &handleInterrupt);
-
-    // Main thread now sleeps.
-    for(;;)
-    {
-        //printf("loopy");
-        fflush(stdout);
-        nanosleep(&tim, NULL);
+    struct gpiod_line *line = gpiod_chip_get_line(chip, _pinNum);
+    if (!line) {
+        fprintf(stderr, "Failed to get line %d on %s\n", _pinNum, chipname);
+        gpiod_chip_close(chip);
+        exit(1);
     }
+
+    if (gpiod_line_request_both_edges_events(line, "piook") < 0) {
+        perror("gpiod_line_request_both_edges_events");
+        gpiod_chip_close(chip);
+        exit(1);
+    }
+
+    // Event loop: wait for rising/falling edge events and forward to handler.
+    for (;;) {
+        int rv = gpiod_line_event_wait(line, NULL); // wait indefinitely
+        if (rv < 0) {
+            perror("gpiod_line_event_wait");
+            break;
+        }
+        if (rv == 0) {
+            continue; // timeout (won't happen with NULL) but keep loop safe
+        }
+        struct gpiod_line_event event;
+        if (gpiod_line_event_read(line, &event) == 0) {
+            int highLow = (event.event_type == GPIOD_LINE_EVENT_RISING) ? 1 : 0;
+            unsigned long timeMicros = (unsigned long)event.ts.tv_sec * 1000000UL + (unsigned long)event.ts.tv_nsec / 1000UL;
+            handleEvent(highLow, timeMicros);
+        }
+    }
+
+    gpiod_line_release(line);
+    gpiod_chip_close(chip);
+    return 0;
 }
 
 /*===========================================================
@@ -49,40 +69,29 @@ const int __maxBits = 128;
 int _bitBuff[__maxBits+1];
 int _bitIdx = 0;
 
-void handleInterrupt() 
+void handleEvent(int highLow, unsigned long timeMicros)
 {
-    // FIXME: These static variables are unsafe because the interrupt handler can get called
-    // while a handler is already running (maximum of two calls at a time according to wiringPi docs).
-    // Perhaps use a spinlock? 
-    // Ideally I'd like to queue the work for another thread to perform, but that's beyond my 
-    // C++/Linux abilities right now!
+    // NOTE: This function was originally an ISR. With libgpiod events we are called
+    // from the event loop; same logic reused but timestamp is supplied by the kernel.
     static unsigned int duration;
     static unsigned long lastTime;
     static int prevPulse = 0;
 
-    // Get current time and IO pin level.
-    long time = micros();
-    int highLow = digitalRead(_pinNum);
-
-    // Calc duration since last interrupt.
-    // TODO: Get high precision interrupt time? (i.e. recorded with the actual interrupt)
-    duration = time - lastTime;
+    unsigned long time = timeMicros;
+    // Calc duration since last event (microseconds)
+    duration = (unsigned int)(time - lastTime);
     lastTime = time;
 
-    // ENHANCEMENT: The below logic relies on a noise pulse to trigger attempted decoding of a received message; we should attempt decode 
-    // upon reception of enough bits and perhaps use a circular buffer.
-    
     // Decode pulse.
     int code = decodePulse(highLow, duration);
     if(0 == code)
     {   // Noise detected.
-        // If we have buffered data then now is a good time to dump it.   
         if(_bitIdx != 0)
         {
             int preambleIdx = scanForPreamble();
             if(-1 != preambleIdx) {
                 processSequence(preambleIdx + 4);
-            }   
+            }
         }
 
         // Reset pulseBuff.
@@ -264,25 +273,25 @@ void parseOptions(int argc, char *argv[])
         printHelp();
         exit(1);
     }
+    // Note: _pinNum is the GPIO line offset for gpiochip0 (kernel/BCM numbering)
     _pinNum = atoi(argv[1]);
     _outfilename = argv[2];
 }
 
 void printHelp()
 {
-    printf("piook: Raspberry Pi On-Off Keying Decoder for CliMET 433MHz weather station.\n");
+    printf("piook: Linux GPIO character-device (libgpiod) On-Off Keying Decoder for CliMET 433MHz weather station.\n");
     printf("Usage:\n");
-    printf("  piook pinNumber outfile\n");
+    printf("  piook gpioLine outfile\n");
     printf("\n");
-    printf("pinNumber: GPIO pin number (wiringPi number scheme) to listen on. Based on the wiringPi 'simplified' pin numbering scheme (see defined at http://wiringpi.com/pins/)\n");
+    printf("gpioLine: GPIO line number (kernel/BCM offset for gpiochip0) to listen on.\n");
     printf("outfile: filename to write data to.\n");
     printf("\n");
-    printf(" * Must be called with root privileges.\n\n");
-    printf(" * piook will listen on the specified pin for valid OOK sequences from the cliMET weather station.\n\n");
+    printf(" * Must be called with privileges to access /dev/gpiochip* (usually root or gpio group).\n\n");
+    printf(" * piook will listen on the specified gpio line for valid OOK sequences from the cliMET weather station.\n\n");
     printf(" * Valid sequences are decoded to a temperature in Centigrade, and a relative humidity (RH%) value.\n\n");
-    printf(" * The decoded data is written to the output file in the format: temp,RH with a newline (\\n) terminator\n\n");
-    printf(" * Each update overwrites the previous file, i.e. the file will always contain a single line\n");
-    printf("   containing the most recently received data.\n\n");
+    printf(" * Decoded data is written to the output file in the format: temp,RH\n\n");
+    printf(" * Each update overwrites the previous file; the file will contain the most recent reading.\n\n");
     printf(" * Project URL: http://github.com/colgreen/piook\n\n");
 }
 
