@@ -12,8 +12,8 @@
 #define PREAMBLE_SEQ {1, 1, 1, 1, 2, 1, 2, 2}
 
 // GPIO Pin to monitor.
-int _pinNum = 7;
-char* _outfilename;
+int g_pinNumber = 7;
+char* g_outputFilename;
 
 int main(int argc, char *argv[])
 {
@@ -28,20 +28,20 @@ int main(int argc, char *argv[])
     }
     printf("Opened GPIO chip %s\n", chipname);
 
-    struct gpiod_line *line = gpiod_chip_get_line(chip, _pinNum);
+    struct gpiod_line *line = gpiod_chip_get_line(chip, g_pinNumber);
     if (!line) {
-        fprintf(stderr, "Failed to get line %d on %s\n", _pinNum, chipname);
+        fprintf(stderr, "Failed to get line %d on %s\n", g_pinNumber, chipname);
         gpiod_chip_close(chip);
         exit(1);
     }
-    printf("Got GPIO line %d\n", _pinNum);
+    printf("Got GPIO line %d\n", g_pinNumber);
 
     if (gpiod_line_request_both_edges_events(line, "piook") < 0) {
         perror("gpiod_line_request_both_edges_events");
         gpiod_chip_close(chip);
         exit(1);
     }
-    printf("Requested events on GPIO line %d\n", _pinNum);
+    printf("Requested events on GPIO line %d\n", g_pinNumber);
 
     // Event loop: wait for rising/falling edge events and forward to handler.
     printf("Starting event loop, waiting for GPIO events...\n");
@@ -74,8 +74,8 @@ We record received 'pulses'; there are three kinds of pulse:
 3 - 'on' pulse. 
 0 - Represents a 'noise' pulse.
 =============================================================*/
-int _bitBuff[MAX_BIT_COUNT + 1];
-int _bitIdx = 0;
+int g_bitBuffer[MAX_BIT_COUNT + 1];
+int g_bitIndex = 0;
 
 void handleEvent(int highLow, unsigned long timeMicros)
 {
@@ -94,7 +94,7 @@ void handleEvent(int highLow, unsigned long timeMicros)
     int code = decodePulse(highLow, duration);
     if(0 == code)
     {   // Noise detected.
-        if(_bitIdx != 0)
+        if(g_bitIndex != 0)
         {
             int preambleIdx = scanForPreamble();
             if(-1 != preambleIdx) {
@@ -103,7 +103,7 @@ void handleEvent(int highLow, unsigned long timeMicros)
         }
 
         // Reset pulseBuff.
-        _bitIdx = 0;
+        g_bitIndex = 0;
         prevPulse = 0;
         return;
     }
@@ -118,14 +118,14 @@ void handleEvent(int highLow, unsigned long timeMicros)
         }
 
         // 'Off' pulse received.
-        if(_bitIdx >= MAX_BIT_COUNT)
+        if(g_bitIndex >= MAX_BIT_COUNT)
         {   // Pulse train is longer than expected. Reset buffer.
-            _bitIdx = 0;
+            g_bitIndex = 0;
             return;
         }
 
         // Buffer received bit.
-        _bitBuff[_bitIdx++] = code;
+        g_bitBuffer[g_bitIndex++] = code;
     }
     prevPulse = code;
 }
@@ -135,20 +135,20 @@ Pulse durations in microseconds. These were determined by examining the signal t
 ClimeMET CM7-TX, remote unit, transmitting on 433.92 MHz (temperature and humidity sensor).
 ClimeMET CM9088 (Master unit)
 ======================*/
-const unsigned int __onMu = 1000;
-const unsigned int __offShortMu = 500;
-const unsigned int __offLongMu = 1500;
+const unsigned int ON_PULSE_US = 1000;
+const unsigned int OFF_SHORT_PULSE_US = 500;
+const unsigned int OFF_LONG_PULSE_US = 1500;
 
 // We probably need to allow for timing errors/jitter due to code runing on a non-realtime operating system.
-const unsigned int __jitterWindow = 250;
-const unsigned int __onMuUpper = __onMu + __jitterWindow;
-const unsigned int __onMuLower = __onMu - __jitterWindow;
+const unsigned int JITTER_WINDOW_US = 250;
+const unsigned int ON_PULSE_UPPER_US = ON_PULSE_US + JITTER_WINDOW_US;
+const unsigned int ON_PULSE_LOWER_US = ON_PULSE_US - JITTER_WINDOW_US;
 
-const unsigned int __offShortMuUpper = __offShortMu + __jitterWindow;
-const unsigned int __offShortMuLower = __offShortMu - __jitterWindow;
+const unsigned int OFF_SHORT_PULSE_UPPER_US = OFF_SHORT_PULSE_US + JITTER_WINDOW_US;
+const unsigned int OFF_SHORT_PULSE_LOWER_US = OFF_SHORT_PULSE_US - JITTER_WINDOW_US;
 
-const unsigned int __offLongMuUpper = __offLongMu + __jitterWindow;
-const unsigned int __offLongMuLower = __offLongMu - __jitterWindow;
+const unsigned int OFF_LONG_PULSE_UPPER_US = OFF_LONG_PULSE_US + JITTER_WINDOW_US;
+const unsigned int OFF_LONG_PULSE_LOWER_US = OFF_LONG_PULSE_US - JITTER_WINDOW_US;
 
 int decodePulse(int highLow, unsigned int duration)
 {
@@ -156,17 +156,17 @@ int decodePulse(int highLow, unsigned int duration)
     if(0 == highLow)
     {
         // Test for short 'off' pulse.
-        if(duration > __offShortMuLower && duration < __offShortMuUpper) {
+        if(duration > OFF_SHORT_PULSE_LOWER_US && duration < OFF_SHORT_PULSE_UPPER_US) {
             return 1;
         }
-        else if(duration > __offLongMuLower && duration < __offLongMuUpper) {
+        else if(duration > OFF_LONG_PULSE_LOWER_US && duration < OFF_LONG_PULSE_UPPER_US) {
             return 2;
         }
         return 0;
     }
 
     // Test for 'on' pulse.
-    if(duration > __onMuLower && duration < __onMuUpper) {
+    if(duration > ON_PULSE_LOWER_US && duration < ON_PULSE_UPPER_US) {
         return 3;
     }
 
@@ -179,10 +179,10 @@ int scanForPreamble()
 {
     static int preambleSeq[PREAMBLE_LEN] = PREAMBLE_SEQ;
 
-    for(int i = 0; i < _bitIdx - PREAMBLE_LEN; i++)
+    for(int i = 0; i < g_bitIndex - PREAMBLE_LEN; i++)
     {
         int j = 0;
-        for(; j < PREAMBLE_LEN && _bitBuff[j + i] == preambleSeq[j]; j++)
+        for(; j < PREAMBLE_LEN && g_bitBuffer[j + i] == preambleSeq[j]; j++)
             ;
                 
         if(PREAMBLE_LEN == j) {
@@ -195,7 +195,7 @@ int scanForPreamble()
 void processSequence(int preambleIdx)
 {
     // Convert the buffered bits into a byte array.
-    int bitLen = _bitIdx - preambleIdx;
+    int bitLen = g_bitIndex - preambleIdx;
     int dataLen = bitLen / 8;
     uint8_t data[EXPECTED_DATA_LEN]; // Fixed size buffer.
     int idx = preambleIdx;
@@ -212,7 +212,7 @@ void processSequence(int preambleIdx)
 
         for(int j = 0; j < 8; j++, idx++)
         {
-            if(1 == _bitBuff[idx]) {
+            if(1 == g_bitBuffer[idx]) {
                 b += mask;
             }
             mask = mask >> 1;
@@ -242,9 +242,9 @@ void processSequence(int preambleIdx)
     int rh = data[3];
 
     // Write to file.
-    if(NULL != _outfilename)
+    if(NULL != g_outputFilename)
     {
-        FILE *f = fopen(_outfilename, "w");
+        FILE *f = fopen(g_outputFilename, "w");
         if (!f) {
             perror("Failed to open output file");
             return;
@@ -288,14 +288,14 @@ void parseOptions(int argc, char *argv[])
         printHelp();
         exit(1);
     }
-    // Note: _pinNum is the GPIO line offset for gpiochip0 (kernel/BCM numbering)
+    // Note: g_pinNumber is the GPIO line offset for gpiochip0 (kernel/BCM numbering)
     char *endptr;
-    _pinNum = strtol(argv[1], &endptr, 10);
-    if (*endptr != '\0' || _pinNum < 0 || _pinNum > 53) {
+    g_pinNumber = strtol(argv[1], &endptr, 10);
+    if (*endptr != '\0' || g_pinNumber < 0 || g_pinNumber > 53) {
         fprintf(stderr, "Invalid GPIO pin number: %s\n", argv[1]);
         exit(1);
     }
-    _outfilename = argv[2];
+    g_outputFilename = argv[2];
 }
 
 void printHelp()
