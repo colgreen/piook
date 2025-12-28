@@ -91,7 +91,7 @@ PULSE_ON - 'on' pulse.
 PULSE_NOISE - Represents a 'noise' pulse.
 =============================================================*/
 int g_bitBuffer[MAX_BIT_COUNT + 1];
-int g_bitIndex = 0;
+size_t g_bitIndex = 0;
 
 void handleEvent(int highLow, unsigned long timeMicros)
 {
@@ -99,7 +99,7 @@ void handleEvent(int highLow, unsigned long timeMicros)
     // from the event loop; same logic reused but timestamp is supplied by the kernel.
     static unsigned int duration;
     static unsigned long lastTime;
-    static int prevPulse = PULSE_NOISE;
+    static enum PulseType prevPulse = PULSE_NOISE;
 
     unsigned long time = timeMicros;
     // Calc duration since last event (microseconds)
@@ -107,14 +107,14 @@ void handleEvent(int highLow, unsigned long timeMicros)
     lastTime = time;
 
     // Decode pulse.
-    int code = decodePulse(highLow, duration);
+    enum PulseType code = decodePulse(highLow, duration);
     if(PULSE_NOISE == code)
     {
         if(g_bitIndex != 0)
         {
-            int preambleIdx = scanForPreamble();
-            if(-1 != preambleIdx) {
-                processSequence(preambleIdx + 4);
+            size_t preambleIdx = scanForPreamble();
+            if(SIZE_MAX != preambleIdx) {
+                processSequence((int)(preambleIdx + 4));
             }
         }
 
@@ -166,7 +166,7 @@ const unsigned int OFF_SHORT_PULSE_LOWER_US = OFF_SHORT_PULSE_US - JITTER_WINDOW
 const unsigned int OFF_LONG_PULSE_UPPER_US = OFF_LONG_PULSE_US + JITTER_WINDOW_US;
 const unsigned int OFF_LONG_PULSE_LOWER_US = OFF_LONG_PULSE_US - JITTER_WINDOW_US;
 
-int decodePulse(int highLow, unsigned int duration)
+enum PulseType decodePulse(int highLow, unsigned int duration)
 {
     // Decode the pulse type based on signal level and duration.
     if(0 == highLow)
@@ -191,18 +191,18 @@ int decodePulse(int highLow, unsigned int duration)
 }
 
 // Scan the buffered pulses for the fixed preamble sequence.
-int scanForPreamble()
+size_t scanForPreamble()
 {
     static const int preambleSeq[PREAMBLE_LEN] = PREAMBLE_SEQ;
 
     // Ensure we have enough bits to scan for the preamble
     if (g_bitIndex < PREAMBLE_LEN) {
-        return -1;
+        return SIZE_MAX;
     }
 
-    for(int i = 0; i < g_bitIndex - PREAMBLE_LEN; i++)
+    for(size_t i = 0; i < g_bitIndex - PREAMBLE_LEN; i++)
     {
-        int j = 0;
+        size_t j = 0;
         for(; j < PREAMBLE_LEN && g_bitBuffer[j + i] == preambleSeq[j]; j++)
             ;
                 
@@ -210,28 +210,28 @@ int scanForPreamble()
             return i;
         }
     }
-    return -1;
+    return SIZE_MAX;
 }
 
-void processSequence(int preambleIdx)
+void processSequence(size_t preambleIdx)
 {
     // Convert the buffered bits into a byte array.
-    int bitLen = g_bitIndex - preambleIdx;
-    int dataLen = bitLen / 8;
+    size_t bitLen = g_bitIndex - preambleIdx;
+    size_t dataLen = bitLen / 8;
     uint8_t data[EXPECTED_DATA_LEN]; // Fixed size buffer.
-    int idx = preambleIdx;
+    size_t idx = preambleIdx;
 
     // Only process if we have the expected data length.
     if (dataLen != EXPECTED_DATA_LEN) {
         return;
     }
 
-    for(int i = 0; i < dataLen; i++)
+    for(size_t i = 0; i < dataLen; i++)
     {
         uint8_t b = 0;
         uint8_t mask = 0x80;
 
-        for(int j = 0; j < 8; j++, idx++)
+        for(size_t j = 0; j < 8; j++, idx++)
         {
             if(PULSE_SHORT_OFF == g_bitBuffer[idx]) {
                 b += mask;
