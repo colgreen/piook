@@ -195,6 +195,11 @@ int scanForPreamble()
 {
     static const int preambleSeq[PREAMBLE_LEN] = PREAMBLE_SEQ;
 
+    // Ensure we have enough bits to scan for the preamble
+    if (g_bitIndex < PREAMBLE_LEN) {
+        return -1;
+    }
+
     for(int i = 0; i < g_bitIndex - PREAMBLE_LEN; i++)
     {
         int j = 0;
