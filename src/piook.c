@@ -6,10 +6,26 @@
 #include <unistd.h>
 #include "piook.h"
 
+enum PulseType {
+    PULSE_NOISE = 0,     // A pulse that does not conform to expected timings.
+    PULSE_SHORT_OFF = 1, // Represents a binary 1.
+    PULSE_LONG_OFF = 2,  // Represents a binary 0.
+    PULSE_ON = 3         // 'On' pulse.
+};
+
 #define MAX_BIT_COUNT 128
 #define EXPECTED_DATA_LEN 5
 #define PREAMBLE_LEN 8
-#define PREAMBLE_SEQ {1, 1, 1, 1, 2, 1, 2, 2}
+#define PREAMBLE_SEQ {
+    PULSE_SHORT_OFF,
+    PULSE_SHORT_OFF,
+    PULSE_SHORT_OFF,
+    PULSE_SHORT_OFF,
+    PULSE_LONG_OFF,
+    PULSE_SHORT_OFF,
+    PULSE_LONG_OFF,
+    PULSE_LONG_OFF
+}
 
 // GPIO Pin to monitor.
 int g_pinNumber = 7;
@@ -69,10 +85,10 @@ int main(int argc, char *argv[])
 
 /*===========================================================
 We record received 'pulses'; there are three kinds of pulse:
-1 - short 'off' pulse. Represents a binary 1.
-2 - long 'off' pulse. Represents a binary 0.
-3 - 'on' pulse. 
-0 - Represents a 'noise' pulse.
+PULSE_SHORT_OFF - short 'off' pulse. Represents a binary 1.
+PULSE_LONG_OFF - long 'off' pulse. Represents a binary 0.
+PULSE_ON - 'on' pulse. 
+PULSE_NOISE - Represents a 'noise' pulse.
 =============================================================*/
 int g_bitBuffer[MAX_BIT_COUNT + 1];
 int g_bitIndex = 0;
@@ -83,7 +99,7 @@ void handleEvent(int highLow, unsigned long timeMicros)
     // from the event loop; same logic reused but timestamp is supplied by the kernel.
     static unsigned int duration;
     static unsigned long lastTime;
-    static int prevPulse = 0;
+    static int prevPulse = PULSE_NOISE;
 
     unsigned long time = timeMicros;
     // Calc duration since last event (microseconds)
@@ -92,8 +108,8 @@ void handleEvent(int highLow, unsigned long timeMicros)
 
     // Decode pulse.
     int code = decodePulse(highLow, duration);
-    if(0 == code)
-    {   // Noise detected.
+    if(PULSE_NOISE == code)
+    {
         if(g_bitIndex != 0)
         {
             int preambleIdx = scanForPreamble();
@@ -104,14 +120,14 @@ void handleEvent(int highLow, unsigned long timeMicros)
 
         // Reset pulseBuff.
         g_bitIndex = 0;
-        prevPulse = 0;
+        prevPulse = PULSE_NOISE;
         return;
     }
 
     // Note. All recorded 'off' pulses must be preceded by an 'on' pulse.
-    if(3 == prevPulse)
+    if(PULSE_ON == prevPulse)
     {
-        if(3 == code)
+        if(PULSE_ON == code)
         {   // 'On' pulse followed by another is not really possible, but if it does
             // occur then just ignore and wait for an 'off' pulse.
             return;
@@ -152,26 +168,26 @@ const unsigned int OFF_LONG_PULSE_LOWER_US = OFF_LONG_PULSE_US - JITTER_WINDOW_U
 
 int decodePulse(int highLow, unsigned int duration)
 {
-    // Decode the pulse type based on signal level and duration
+    // Decode the pulse type based on signal level and duration.
     if(0 == highLow)
     {
         // Test for short 'off' pulse.
         if(duration > OFF_SHORT_PULSE_LOWER_US && duration < OFF_SHORT_PULSE_UPPER_US) {
-            return 1;
+            return PULSE_SHORT_OFF;
         }
         else if(duration > OFF_LONG_PULSE_LOWER_US && duration < OFF_LONG_PULSE_UPPER_US) {
-            return 2;
+            return PULSE_LONG_OFF;
         }
-        return 0;
+        return PULSE_NOISE;
     }
 
     // Test for 'on' pulse.
     if(duration > ON_PULSE_LOWER_US && duration < ON_PULSE_UPPER_US) {
-        return 3;
+        return PULSE_ON;
     }
 
     // Noise.
-    return 0;
+    return PULSE_NOISE;
 }
 
 // Scan the buffered pulses for the fixed preamble sequence.
@@ -212,7 +228,7 @@ void processSequence(int preambleIdx)
 
         for(int j = 0; j < 8; j++, idx++)
         {
-            if(1 == g_bitBuffer[idx]) {
+            if(PULSE_SHORT_OFF == g_bitBuffer[idx]) {
                 b += mask;
             }
             mask = mask >> 1;
