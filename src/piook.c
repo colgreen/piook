@@ -23,6 +23,7 @@ int main(int argc, char *argv[])
         perror("gpiod_chip_open_by_name");
         exit(1);
     }
+    printf("Opened GPIO chip %s\n", chipname);
 
     struct gpiod_line *line = gpiod_chip_get_line(chip, _pinNum);
     if (!line) {
@@ -30,14 +31,17 @@ int main(int argc, char *argv[])
         gpiod_chip_close(chip);
         exit(1);
     }
+    printf("Got GPIO line %d\n", _pinNum);
 
     if (gpiod_line_request_both_edges_events(line, "piook") < 0) {
         perror("gpiod_line_request_both_edges_events");
         gpiod_chip_close(chip);
         exit(1);
     }
+    printf("Requested events on GPIO line %d\n", _pinNum);
 
     // Event loop: wait for rising/falling edge events and forward to handler.
+    printf("Starting event loop, waiting for GPIO events...\n");
     for (;;) {
         int rv = gpiod_line_event_wait(line, NULL); // wait indefinitely
         if (rv < 0) {
@@ -51,6 +55,7 @@ int main(int argc, char *argv[])
         if (gpiod_line_event_read(line, &event) == 0) {
             int highLow = (event.event_type == GPIOD_LINE_EVENT_RISING_EDGE) ? 1 : 0;
             unsigned long timeMicros = (unsigned long)event.ts.tv_sec * 1000000UL + (unsigned long)event.ts.tv_nsec / 1000UL;
+            printf("Event received: type=%d, highLow=%d, time=%lu\n", event.event_type, highLow, timeMicros);
             handleEvent(highLow, timeMicros);
         }
     }
@@ -238,6 +243,7 @@ void processSequence(int preambleIdx)
         FILE *f = fopen(_outfilename, "w");
         fprintf(f, "%3.2f,%d\n", tempCelsius, rh); 
         fclose(f);
+        printf("Data written to file: Temp: %4.2f, RH: %d\n", tempCelsius, rh);
     }
     else
     {
