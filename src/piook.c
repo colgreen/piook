@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include "piook.h"
 
+#define __maxBits 128
+
 // GPIO Pin to monitor.
 int _pinNum = 7;
 char* _outfilename;
@@ -47,7 +49,7 @@ int main(int argc, char *argv[])
         }
         struct gpiod_line_event event;
         if (gpiod_line_event_read(line, &event) == 0) {
-            int highLow = (event.event_type == GPIOD_LINE_EVENT_RISING) ? 1 : 0;
+            int highLow = (event.event_type == GPIOD_LINE_EVENT_RISING_EDGE) ? 1 : 0;
             unsigned long timeMicros = (unsigned long)event.ts.tv_sec * 1000000UL + (unsigned long)event.ts.tv_nsec / 1000UL;
             handleEvent(highLow, timeMicros);
         }
@@ -65,7 +67,6 @@ We record received 'pulses'; there are three kinds of pulse:
 3 - 'on' pulse. 
 0 - Represents a 'noise' pulse.
 =============================================================*/
-const int __maxBits = 128;
 int _bitBuff[__maxBits+1];
 int _bitIdx = 0;
 
