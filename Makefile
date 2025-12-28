@@ -2,7 +2,7 @@
 
 # Compiler and flags
 CC = gcc
-CFLAGS = -Wall -Wextra -O2 -std=gnu99
+CFLAGS = -Wall -Wextra -O3 -std=gnu99 -march=native
 LDFLAGS = -lgpiod
 
 # Target executable

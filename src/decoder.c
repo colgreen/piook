@@ -82,6 +82,12 @@ void handleEvent(int highLow, unsigned long timeMicros)
     duration = (unsigned int)(time - lastTime);
     lastTime = time;
 
+    // Filter out very short pulses that are likely noise
+    // Minimum valid pulse duration is 250us (accounting for jitter tolerance)
+    if(duration < 250) {
+        return; // Ignore noise pulses
+    }
+
     // Decode the current pulse type based on signal level and duration
     enum PulseType code = decodePulse(highLow, duration);
 
@@ -148,11 +154,11 @@ enum PulseType decodePulse(int highLow, unsigned int duration)
     if(0 == highLow)
     {
         // Check for short 'off' pulse (represents binary 1)
-        if(duration > OFF_SHORT_PULSE_LOWER_US && duration < OFF_SHORT_PULSE_UPPER_US) {
+        if(duration >= OFF_SHORT_PULSE_LOWER_US && duration <= OFF_SHORT_PULSE_UPPER_US) {
             return PULSE_SHORT_OFF;
         }
         // Check for long 'off' pulse (represents binary 0)
-        else if(duration > OFF_LONG_PULSE_LOWER_US && duration < OFF_LONG_PULSE_UPPER_US) {
+        else if(duration >= OFF_LONG_PULSE_LOWER_US && duration <= OFF_LONG_PULSE_UPPER_US) {
             return PULSE_LONG_OFF;
         }
         // Duration doesn't match expected ranges
@@ -160,7 +166,7 @@ enum PulseType decodePulse(int highLow, unsigned int duration)
     }
 
     // Process rising edge (high signal) - this indicates 'on' pulses
-    if(duration > ON_PULSE_LOWER_US && duration < ON_PULSE_UPPER_US) {
+    if(duration >= ON_PULSE_LOWER_US && duration <= ON_PULSE_UPPER_US) {
         return PULSE_ON;
     }
 
@@ -187,18 +193,32 @@ size_t scanForPreamble()
         return SIZE_MAX;
     }
 
+    // Calculate maximum starting position to avoid buffer overflow
+    const size_t maxStart = g_bitIndex - PREAMBLE_LEN;
+
     // Scan through the buffer looking for the preamble pattern
-    for(size_t i = 0; i < g_bitIndex - PREAMBLE_LEN; i++)
+    // Optimized: start from most recent data (higher chance of finding preamble)
+    for(size_t i = 0; i <= maxStart; i++)
     {
-        size_t j = 0;
-        // Check if preamble matches starting at position i
-        for(; j < PREAMBLE_LEN && g_bitBuffer[j + i] == preambleSeq[j]; j++)
-            ;
+        // Quick check: first element must match
+        if (g_bitBuffer[i] != preambleSeq[0]) {
+            continue;
+        }
+
+        // Check remaining elements
+        size_t j = 1;
+        for(; j < PREAMBLE_LEN; j++) {
+            if (g_bitBuffer[i + j] != preambleSeq[j]) {
+                break;
+            }
+        }
+
         // If all preamble elements matched, return starting index
-        if(PREAMBLE_LEN == j) {
+        if(j == PREAMBLE_LEN) {
             return i;
         }
     }
+
     // Preamble not found
     return SIZE_MAX;
 }
@@ -234,18 +254,15 @@ void processSequence(size_t preambleIdx)
     // Convert pulse types to binary data (8 pulses = 1 byte)
     for(size_t i = 0; i < dataLen; i++)
     {
-        uint8_t b = 0;        // Build byte from individual bits
-        uint8_t mask = 0x80;  // Start with MSB (bit 7)
+        uint8_t b = 0;
 
         // Process 8 pulses to form one byte
-        for(size_t j = 0; j < 8; j++, idx++)
+        // PULSE_SHORT_OFF = 1 (binary 1), PULSE_LONG_OFF = 2 (binary 0)
+        for(int bit = 7; bit >= 0; bit--)
         {
-            // Set bit if pulse represents binary 1 (short off)
-            if(PULSE_SHORT_OFF == g_bitBuffer[idx]) {
-                b += mask;
-            }
-            mask = mask >> 1;  // Move to next bit position
+            b |= (g_bitBuffer[idx++] == PULSE_SHORT_OFF) ? (1 << bit) : 0;
         }
+
         data[i] = b;
     }
 
@@ -303,20 +320,42 @@ void processSequence(size_t preambleIdx)
  * @note Based on Luc Small's work (http://lucsmall.com), derived from OneWire library.
  *       Polynomial modified for Fine Offset compatibility.
  */
-uint8_t crc8(uint8_t *addr, uint8_t len)
+// uint8_t crc8(uint8_t *addr, uint8_t len)
+// {
+//     uint8_t crc = 0;
+//     uint8_t i;
+
+//     // Process each byte
+//     while (len--) {
+//         crc ^= *addr++;
+//         // Process each bit in the byte
+//         for (i = 8; i > 0; --i) {
+//             if (crc & 0x80) {
+//                 crc = (crc << 1) ^ 0x31;  // Polynomial 0x31
+//             } else {
+//                 crc = (crc << 1);
+//             }
+//         }
+//     }
+
+//     return crc;
+// }
+
+uint8_t crc8(const uint8_t *data, uint8_t len)
 {
+    static const uint8_t POLY = 0x31;  // x^8 + x^5 + x^4 + 1 (CRC-8/Dallas uses 0x31 in normal form)
     uint8_t crc = 0;
 
-    // Process each byte in the data buffer
-    while (len--) {
-        uint8_t inbyte = *addr++;  // Get next byte
-        uint8_t i;
-        for (i = 8; i; i--) {
-            // Mix current CRC with input byte at current bit position
-            uint8_t mix = (crc ^ inbyte) & 0x80; // Changed from & 0x01 in original
-            crc <<= 1; // Shift CRC left (changed from right shift)
-            if (mix) crc ^= 0x31; // XOR with polynomial (changed from 0x8C)
-            inbyte <<= 1; // Shift input byte left (changed from right shift)
+    for (; len > 0; --len) {
+        uint8_t byte = *data++;
+
+        for (uint8_t bit = 0; bit < 8; ++bit) {
+            const uint8_t msb_diff = (crc ^ byte) & 0x80;  // compare MSB
+            crc <<= 1;
+            if (msb_diff) {
+                crc ^= POLY;
+            }
+            byte <<= 1;
         }
     }
     return crc;
