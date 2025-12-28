@@ -1,308 +1,255 @@
+/**
+ * @file piook.c
+ * @brief Main program for piook OOK decoder.
+ *
+ * This is the main entry point for the piook application. It sets up GPIO
+ * monitoring using libgpiod, processes command-line arguments, and runs
+ * the event loop to decode OOK signals from a CliMET weather station.
+ */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <time.h>
-#include <wiringPi.h>
+#include <gpiod.h>
+#include <unistd.h>
+#include <signal.h>
+#include <getopt.h>
+#include <string.h>
 #include "piook.h"
 
-// GPIO Pin to monitor.
-int _pinNum = 7;
-char* _outfilename;
+/** GPIO pin number to monitor (kernel/BCM offset for gpiochip0) */
+int g_pinNumber = 7;
+/** Output filename for decoded weather data */
+char* g_outputFilename;
+/** GPIO chip name to use */
+const char* g_chipName = "gpiochip0";
+/** Verbose output flag */
+int g_verbose = 0;
 
-int main(int argc, char *argv[]) 
+/** Global flag for graceful shutdown */
+volatile sig_atomic_t g_keepRunning = 1;
+
+/**
+ * @brief Signal handler for graceful shutdown.
+ *
+ * Sets the global flag to stop the main event loop.
+ *
+ * @param signum Signal number (unused)
+ */
+void signalHandler(int signum)
 {
-    // Parse command line options.
+    (void)signum; // Suppress unused parameter warning
+    g_keepRunning = 0;
+}
+
+/**
+ * @brief Main entry point for the piook application.
+ *
+ * Initializes GPIO monitoring, sets up event handling, and runs the main
+ * event loop to process OOK signals from the weather station.
+ *
+ * @param argc Number of command-line arguments
+ * @param argv Array of command-line argument strings
+ * @return Exit status (0 on success, 1 on error)
+ */
+int main(int argc, char *argv[])
+{
+    // Set up signal handlers for graceful shutdown
+    signal(SIGINT, signalHandler);  // Ctrl+C
+    signal(SIGTERM, signalHandler); // kill command
+
+    // Parse command-line arguments to get GPIO pin and output file
     parseOptions(argc, argv);
 
-    struct timespec tim;
-    tim.tv_sec = 0;
-    tim.tv_nsec = 500000000L;
-
-    // Init GPIO and wiringPi using the wiringPi 'simplified' pin numbering scheme.
-    // Scheme is defined at http://wiringpi.com/pins/
-    // Note. Must be called with root privileges.
-    if(wiringPiSetup() == -1) 
-    {   // Init failed. wiringPi writes a message so just return an error code here.
+    // Use specified GPIO chip
+    struct gpiod_chip *chip = gpiod_chip_open_by_name(g_chipName);
+    if (!chip) {
+        perror("gpiod_chip_open_by_name");
         exit(1);
     }
-
-    // Hook-up interrupt service routine.
-    wiringPiISR(_pinNum, INT_EDGE_BOTH, &handleInterrupt);
-
-    // Main thread now sleeps.
-    for(;;)
-    {
-        //printf("loopy");
-        fflush(stdout);
-        nanosleep(&tim, NULL);
-    }
-}
-
-/*===========================================================
-We record received 'pulses'; there are three kinds of pulse:
-1 - short 'off' pulse. Represents a binary 1.
-2 - long 'off' pulse. Represents a binary 0.
-3 - 'on' pulse. 
-0 - Represents a 'noise' pulse.
-=============================================================*/
-const int __maxBits = 128;
-int _bitBuff[__maxBits+1];
-int _bitIdx = 0;
-
-void handleInterrupt() 
-{
-    // FIXME: These static variables are unsafe because the interrupt handler can get called
-    // while a handler is already running (maximum of two calls at a time according to wiringPi docs).
-    // Perhaps use a spinlock? 
-    // Ideally I'd like to queue the work for another thread to perform, but that's beyond my 
-    // C++/Linux abilities right now!
-    static unsigned int duration;
-    static unsigned long lastTime;
-    static int prevPulse = 0;
-
-    // Get current time and IO pin level.
-    long time = micros();
-    int highLow = digitalRead(_pinNum);
-
-    // Calc duration since last interrupt.
-    // TODO: Get high precision interrupt time? (i.e. recorded with the actual interrupt)
-    duration = time - lastTime;
-    lastTime = time;
-
-    // ENHANCEMENT: The below logic relies on a noise pulse to trigger attempted decoding of a received message; we should attempt decode 
-    // upon reception of enough bits and perhaps use a circular buffer.
-    
-    // Decode pulse.
-    int code = decodePulse(highLow, duration);
-    if(0 == code)
-    {   // Noise detected.
-        // If we have buffered data then now is a good time to dump it.   
-        if(_bitIdx != 0)
-        {
-            int preambleIdx = scanForPreamble();
-            if(-1 != preambleIdx) {
-                processSequence(preambleIdx + 4);
-            }   
-        }
-
-        // Reset pulseBuff.
-        _bitIdx = 0;
-        prevPulse = 0;
-        return;
+    if (g_verbose) {
+        printf("Opened GPIO chip %s\n", g_chipName);
     }
 
-    // All recorded 'off' pulses must be preceded by an 'on' pulse.
-    if(3 == prevPulse)
-    {
-        if(3 == code)
-        {   // 'On' pulse followed by another is not really possible, but if it does
-            // occur then just ignore and wait for an 'off' pulse.
-            return;
-        }
-
-        // 'Off' pulse received.
-        if(_bitIdx >= __maxBits)
-        {   // Pulse train is longer than expected. Reset buffer.
-            _bitIdx = 0;
-        }
-
-        // Buffer received bit.
-        _bitBuff[_bitIdx++] = code;
+    // Get the requested GPIO line
+    struct gpiod_line *line = gpiod_chip_get_line(chip, g_pinNumber);
+    if (!line) {
+        fprintf(stderr, "Failed to get line %d on %s\n", g_pinNumber, g_chipName);
+        gpiod_chip_close(chip);
+        exit(1);
     }
-    prevPulse = code;
-}
-
-/*====================
-Pulse durations in microseconds. These were determined by examining the signal transmitted by a
-ClimeMET CM7-TX, remote unit, transmitting on 433.92 MHz (temperature and humidity sensor).
-ClimeMET CM9088 (Master unit)
-======================*/
-const unsigned int __onMu = 1000;
-const unsigned int __offShortMu = 500;
-const unsigned int __offLongMu = 1500;
-
-// We probably need to allow for timing errors/jitter due to code runing on a non-realtime operating system.
-const unsigned int __jitterWindow = 250;
-const unsigned int __onMuUpper = __onMu + __jitterWindow;
-const unsigned int __onMuLower = __onMu - __jitterWindow;
-
-const unsigned int __offShortMuUpper = __offShortMu + __jitterWindow;
-const unsigned int __offShortMuLower = __offShortMu - __jitterWindow;
-
-const unsigned int __offLongMuUpper = __offLongMu + __jitterWindow;
-const unsigned int __offLongMuLower = __offLongMu - __jitterWindow;
-
-int decodePulse(int highLow, unsigned int duration)
-{
-    if(0 == highLow)
-    {
-        // Test for short 'off' pulse.
-        if(duration > __offShortMuLower && duration < __offShortMuUpper) {
-            return 1;
-        }
-        else if(duration > __offLongMuLower && duration < __offLongMuUpper) {
-            return 2;
-        }
-        return 0;
+    if (g_verbose) {
+        printf("Got GPIO line %d\n", g_pinNumber);
     }
 
-    // Test for 'on' pulse.
-    if(duration > __onMuLower && duration < __onMuUpper) {
-        return 3;
+    // Configure line for both rising and falling edge events
+    if (gpiod_line_request_both_edges_events(line, "piook") < 0) {
+        perror("gpiod_line_request_both_edges_events");
+        gpiod_line_release(line);
+        gpiod_chip_close(chip);
+        exit(1);
+    }
+    if (g_verbose) {
+        printf("Requested events on GPIO line %d\n", g_pinNumber);
     }
 
-    // Noise.
+    // Main event loop: wait for and process GPIO events
+    if (g_verbose) {
+        printf("Starting event loop, waiting for GPIO events...\n");
+    }
+    printf("Press Ctrl+C to exit\n");
+    for (;;) {
+        // Check if we should exit
+        if (!g_keepRunning) {
+            printf("\nShutting down gracefully...\n");
+            break;
+        }
+
+        // Wait indefinitely for the next edge event
+        int rv = gpiod_line_event_wait(line, NULL);
+        if (rv < 0) {
+            perror("gpiod_line_event_wait");
+            break;
+        }
+        if (rv == 0) {
+            continue; // Timeout (shouldn't happen with NULL timeout)
+        }
+
+        // Read the event details
+        struct gpiod_line_event event;
+        if (gpiod_line_event_read(line, &event) == 0) {
+            // Convert event type to high/low signal level
+            int highLow = (event.event_type == GPIOD_LINE_EVENT_RISING_EDGE) ? 1 : 0;
+            // Convert timestamp to microseconds
+            unsigned long timeMicros = (unsigned long)event.ts.tv_sec * 1000000UL +
+                                      (unsigned long)event.ts.tv_nsec / 1000UL;
+            // Forward to decoder
+            handleEvent(highLow, timeMicros);
+        }
+    }
+
+    // Cleanup GPIO resources
+    gpiod_line_release(line);
+    gpiod_chip_close(chip);
+    printf("GPIO resources cleaned up. Exiting.\n");
     return 0;
 }
 
-// Scan the buffered pulses for the fixed preamble sequence.
-int scanForPreamble()
-{
-    static int preambleSeq[8] = {1, 1, 1, 1, 2, 1, 2, 2};
-
-    for(int i=0; i<_bitIdx-8; i++)
-    {
-        int j=0;
-        for(; j<8 && _bitBuff[j+i] == preambleSeq[j]; j++);
-                
-        if(8==j) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-void processSequence(int preambleIdx)
-{
-    // Convert the buffered bits into a byte array.
-    int bitLen = _bitIdx - preambleIdx;
-    int dataLen = bitLen / 8;
-    uint8_t data[dataLen];
-    int idx = preambleIdx;
-
-    for(int i=0; i<dataLen; i++)
-    {
-        uint8_t b = 0;
-        uint8_t mask = 0x80;
-
-        for(int j=0; j<8; j++, idx++)
-        {
-            if(1==_bitBuff[idx]) {
-                b += mask;
-            }
-            mask = mask >> 1;
-        }
-        data[i] = b;
-    }
-
-    // For debugging only.
-    //printHex(data, dataLen);
-
-    // Validation.
-    if(5 != dataLen)
-    {   // Reject.
-        return;
-    }
-
-    // Calc checksum.
-    uint8_t checksum = crc8(data, 4);
-    if(checksum != data[4])
-    {   // Reject.
-        return;
-    }
-
-    // Parse data.
-    // Temperature.
-    int tempInt = ((data[1] & 0x07) << 8) + data[2];
-    if(data[1] & 0x08) {
-        tempInt *= -1;
-    }
-    float tempCelsius = tempInt * 0.1;
-
-    // Relative humidity.
-    int rh = data[3];
-
-    // Write to file.
-    if(NULL != _outfilename)
-    {
-        FILE *f = fopen(_outfilename, "w");
-        fprintf(f, "%3.2f,%d\n", tempCelsius, rh); 
-        fclose(f);
-    }
-    else
-    {
-        printf("Temp: %4.2f, RH: %d\n", tempCelsius, rh);
-    }
-}
-
-/*
-* Function taken from Luc Small (http://lucsmall.com), itself
-* derived from the OneWire Arduino library. Modifications to
-* the polynomial according to Fine Offset's CRC8 calulations.
-*/
-uint8_t crc8(uint8_t *addr, uint8_t len)
-{
-    uint8_t crc = 0;
-
-    // Indicated changes are from reference CRC-8 function in OneWire library
-    while (len--) {
-        uint8_t inbyte = *addr++;
-        uint8_t i;
-        for (i = 8; i; i--) {
-            uint8_t mix = (crc ^ inbyte) & 0x80; // changed from & 0x01
-            crc <<= 1; // changed from right shift
-            if (mix) crc ^= 0x31;// changed from 0x8C;
-            inbyte <<= 1; // changed from right shift
-        }
-    }
-    return crc;
-}
-
+/**
+ * @brief Parses command-line arguments using getopt.
+ *
+ * Supports both short and long options for flexible command-line interface.
+ * Options include help, verbose mode, GPIO pin, output file, and GPIO chip.
+ *
+ * @param argc Number of arguments
+ * @param argv Argument array
+ */
 void parseOptions(int argc, char *argv[])
 {
-    if(3 != argc) {
+    int opt;
+    int option_index = 0;
+
+    // Define long options
+    static struct option long_options[] = {
+        {"help",    no_argument,       0, 'h'},
+        {"verbose", no_argument,       0, 'v'},
+        {"pin",     required_argument, 0, 'p'},
+        {"output",  required_argument, 0, 'o'},
+        {"chip",    required_argument, 0, 'c'},
+        {0,         0,                 0,  0 }
+    };
+
+    // Parse options
+    while ((opt = getopt_long(argc, argv, "hvp:o:c:", long_options, &option_index)) != -1) {
+        switch (opt) {
+            case 'h':
+                printHelp();
+                exit(0);
+                break;
+            case 'v':
+                g_verbose = 1;
+                break;
+            case 'p':
+                {
+                    char *endptr;
+                    long pin_val = strtol(optarg, &endptr, 10);
+                    if (*endptr != '\0' || pin_val < 0 || pin_val > 63) {
+                        fprintf(stderr, "Invalid GPIO pin number: %s (must be 0-63)\n", optarg);
+                        exit(1);
+                    }
+                    g_pinNumber = (int)pin_val;
+                }
+                break;
+            case 'o':
+                if (!optarg || strlen(optarg) == 0) {
+                    fprintf(stderr, "Error: Output filename cannot be empty\n");
+                    exit(1);
+                }
+                g_outputFilename = optarg;
+                break;
+            case 'c':
+                if (!optarg || strlen(optarg) == 0) {
+                    fprintf(stderr, "Error: GPIO chip name cannot be empty\n");
+                    exit(1);
+                }
+                g_chipName = optarg;
+                break;
+            case '?':
+                // getopt_long already printed an error message
+                printHelp();
+                exit(1);
+                break;
+            default:
+                printHelp();
+                exit(1);
+                break;
+        }
+    }
+
+    // Check for required arguments
+    if (g_outputFilename == NULL) {
+        fprintf(stderr, "Error: Output filename is required (use -o or --output)\n");
         printHelp();
         exit(1);
     }
-    _pinNum = atoi(argv[1]);
-    _outfilename = argv[2];
+
+    // Check for unexpected non-option arguments
+    if (optind < argc) {
+        fprintf(stderr, "Error: Unexpected argument: %s\n", argv[optind]);
+        printHelp();
+        exit(1);
+    }
 }
 
+/**
+ * @brief Displays usage information and help text.
+ *
+ * Prints detailed information about command-line usage, requirements,
+ * and program functionality with all available options.
+ */
 void printHelp()
 {
-    printf("piook: Raspberry Pi On-Off Keying Decoder for CliMET 433MHz weather station.\n");
-    printf("Usage:\n");
-    printf("  piook pinNumber outfile\n");
-    printf("\n");
-    printf("pinNumber: GPIO pin number (wiringPi number scheme) to listen on. Based on the wiringPi 'simplified' pin numbering scheme (see defined at http://wiringpi.com/pins/)\n");
-    printf("outfile: filename to write data to.\n");
-    printf("\n");
-    printf(" * Must be called with root privileges.\n\n");
-    printf(" * piook will listen on the specified pin for valid OOK sequences from the cliMET weather station.\n\n");
-    printf(" * Valid sequences are decoded to a temperature in Centigrade, and a relative humidity (RH%) value.\n\n");
-    printf(" * The decoded data is written to the output file in the format: temp,RH with a newline (\\n) terminator\n\n");
-    printf(" * Each update overwrites the previous file, i.e. the file will always contain a single line\n");
-    printf("   containing the most recently received data.\n\n");
-    printf(" * Project URL: http://github.com/colgreen/piook\n\n");
+    printf("piook %s\n", PIOOK_VERSION);
+    printf("%s\n", PIOOK_DESCRIPTION);
+    printf("\nUsage:\n");
+    printf("  piook [OPTIONS]\n");
+    printf("\nOptions:\n");
+    printf("  -h, --help                 Show this help message\n");
+    printf("  -v, --verbose              Enable verbose output\n");
+    printf("  -p, --pin PIN              GPIO line number (0-63, default: 7)\n");
+    printf("  -o, --output FILE          Output filename (required)\n");
+    printf("  -c, --chip CHIP            GPIO chip name (default: gpiochip0)\n");
+    printf("\nExamples:\n");
+    printf("  piook -p 17 -o weather.txt\n");
+    printf("  piook --verbose --chip gpiochip1 -p 23 -o data.txt\n");
+    printf("  piook -o weather.txt  (use default pin 7)\n");
+    printf("\nNotes:\n");
+    printf(" * Must be called with privileges to access /dev/gpiochip* (usually root or gpio group).\n");
+    printf(" * piook will listen on the specified gpio line for valid OOK sequences from the cliMET weather station.\n");
+    printf(" * Valid sequences are decoded to a temperature in Centigrade, and a relative humidity (RH%%) value.\n");
+    printf(" * Decoded data is written to the output file in the format: temp,RH\n");
+    printf(" * Each update overwrites the previous file; the file will contain the most recent reading.\n");
+    printf(" * Example output: 23.45,65\n");
+    printf(" * Project URL: http://github.com/colgreen/piook\n");
 }
-
-/* For debugging only*/
-/*
-void printHex(uint8_t* buf, int len)
-{
-    char str[len*3];
-    unsigned char* pin = buf;
-    const char* hex = "0123456789ABCDEF";
-    char* pout = str;
-    int i = 0;
-    for(; i < len-1; ++i){
-        *pout++ = hex[(*pin>>4)&0xF];
-        *pout++ = hex[(*pin++)&0xF];
-        *pout++ = ':';
-    }
-    *pout++ = hex[(*pin>>4)&0xF];
-    *pout++ = hex[(*pin)&0xF];
-    *pout = 0;
-    printf("%s\n", str);
-}
-*/
