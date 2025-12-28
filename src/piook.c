@@ -14,12 +14,17 @@
 #include <gpiod.h>
 #include <unistd.h>
 #include <signal.h>
+#include <getopt.h>
 #include "piook.h"
 
 /** GPIO pin number to monitor (kernel/BCM offset for gpiochip0) */
 int g_pinNumber = 7;
 /** Output filename for decoded weather data */
 char* g_outputFilename;
+/** GPIO chip name to use */
+const char* g_chipName = "gpiochip0";
+/** Verbose output flag */
+int g_verbose = 0;
 
 /** Global flag for graceful shutdown */
 volatile sig_atomic_t g_keepRunning = 1;
@@ -56,23 +61,26 @@ int main(int argc, char *argv[])
     // Parse command-line arguments to get GPIO pin and output file
     parseOptions(argc, argv);
 
-    // Use default GPIO chip (gpiochip0)
-    const char *chipname = "gpiochip0";
-    struct gpiod_chip *chip = gpiod_chip_open_by_name(chipname);
+    // Use specified GPIO chip
+    struct gpiod_chip *chip = gpiod_chip_open_by_name(g_chipName);
     if (!chip) {
         perror("gpiod_chip_open_by_name");
         exit(1);
     }
-    printf("Opened GPIO chip %s\n", chipname);
+    if (g_verbose) {
+        printf("Opened GPIO chip %s\n", g_chipName);
+    }
 
     // Get the requested GPIO line
     struct gpiod_line *line = gpiod_chip_get_line(chip, g_pinNumber);
     if (!line) {
-        fprintf(stderr, "Failed to get line %d on %s\n", g_pinNumber, chipname);
+        fprintf(stderr, "Failed to get line %d on %s\n", g_pinNumber, g_chipName);
         gpiod_chip_close(chip);
         exit(1);
     }
-    printf("Got GPIO line %d\n", g_pinNumber);
+    if (g_verbose) {
+        printf("Got GPIO line %d\n", g_pinNumber);
+    }
 
     // Configure line for both rising and falling edge events
     if (gpiod_line_request_both_edges_events(line, "piook") < 0) {
@@ -80,10 +88,14 @@ int main(int argc, char *argv[])
         gpiod_chip_close(chip);
         exit(1);
     }
-    printf("Requested events on GPIO line %d\n", g_pinNumber);
+    if (g_verbose) {
+        printf("Requested events on GPIO line %d\n", g_pinNumber);
+    }
 
     // Main event loop: wait for and process GPIO events
-    printf("Starting event loop, waiting for GPIO events...\n");
+    if (g_verbose) {
+        printf("Starting event loop, waiting for GPIO events...\n");
+    }
     printf("Press Ctrl+C to exit\n");
     for (;;) {
         // Check if we should exit
@@ -123,53 +135,108 @@ int main(int argc, char *argv[])
 }
 
 /**
- * @brief Parses command-line arguments.
+ * @brief Parses command-line arguments using getopt.
  *
- * Expects exactly 2 arguments: GPIO pin number and output filename.
- * Validates the GPIO pin number range and stores the values in globals.
+ * Supports both short and long options for flexible command-line interface.
+ * Options include help, verbose mode, GPIO pin, output file, and GPIO chip.
  *
  * @param argc Number of arguments
  * @param argv Argument array
  */
 void parseOptions(int argc, char *argv[])
 {
-    // Require exactly 2 arguments: pin number and output file
-    if(3 != argc) {
+    int opt;
+    int option_index = 0;
+
+    // Define long options
+    static struct option long_options[] = {
+        {"help",    no_argument,       0, 'h'},
+        {"verbose", no_argument,       0, 'v'},
+        {"pin",     required_argument, 0, 'p'},
+        {"output",  required_argument, 0, 'o'},
+        {"chip",    required_argument, 0, 'c'},
+        {0,         0,                 0,  0 }
+    };
+
+    // Parse options
+    while ((opt = getopt_long(argc, argv, "hvp:o:c:", long_options, &option_index)) != -1) {
+        switch (opt) {
+            case 'h':
+                printHelp();
+                exit(0);
+                break;
+            case 'v':
+                g_verbose = 1;
+                break;
+            case 'p':
+                {
+                    char *endptr;
+                    g_pinNumber = strtol(optarg, &endptr, 10);
+                    if (*endptr != '\0' || g_pinNumber < 0 || g_pinNumber > 53) {
+                        fprintf(stderr, "Invalid GPIO pin number: %s\n", optarg);
+                        exit(1);
+                    }
+                }
+                break;
+            case 'o':
+                g_outputFilename = optarg;
+                break;
+            case 'c':
+                g_chipName = optarg;
+                break;
+            case '?':
+                // getopt_long already printed an error message
+                printHelp();
+                exit(1);
+                break;
+            default:
+                printHelp();
+                exit(1);
+                break;
+        }
+    }
+
+    // Check for required arguments
+    if (g_outputFilename == NULL) {
+        fprintf(stderr, "Error: Output filename is required (use -o or --output)\n");
         printHelp();
         exit(1);
     }
 
-    // Parse GPIO pin number (kernel/BCM offset for gpiochip0)
-    char *endptr;
-    g_pinNumber = strtol(argv[1], &endptr, 10);
-    if (*endptr != '\0' || g_pinNumber < 0 || g_pinNumber > 53) {
-        fprintf(stderr, "Invalid GPIO pin number: %s\n", argv[1]);
+    // Check for unexpected non-option arguments
+    if (optind < argc) {
+        fprintf(stderr, "Error: Unexpected argument: %s\n", argv[optind]);
+        printHelp();
         exit(1);
     }
-
-    // Store output filename
-    g_outputFilename = argv[2];
 }
 
 /**
  * @brief Displays usage information and help text.
  *
  * Prints detailed information about command-line usage, requirements,
- * and program functionality.
+ * and program functionality with all available options.
  */
 void printHelp()
 {
     printf("piook: Linux GPIO character-device (libgpiod) On-Off Keying Decoder for CliMET 433MHz weather station.\n");
-    printf("Usage:\n");
-    printf("  piook gpioLine outfile\n");
-    printf("\n");
-    printf("gpioLine: GPIO line number (kernel/BCM offset for gpiochip0) to listen on.\n");
-    printf("outfile: filename to write data to.\n");
-    printf("\n");
-    printf(" * Must be called with privileges to access /dev/gpiochip* (usually root or gpio group).\n\n");
-    printf(" * piook will listen on the specified gpio line for valid OOK sequences from the cliMET weather station.\n\n");
-    printf(" * Valid sequences are decoded to a temperature in Centigrade, and a relative humidity (RH%%) value.\n\n");
-    printf(" * Decoded data is written to the output file in the format: temp,RH\n\n");
-    printf(" * Each update overwrites the previous file; the file will contain the most recent reading.\n\n");
-    printf(" * Project URL: http://github.com/colgreen/piook\n\n");
+    printf("\nUsage:\n");
+    printf("  piook [OPTIONS]\n");
+    printf("\nOptions:\n");
+    printf("  -h, --help                 Show this help message\n");
+    printf("  -v, --verbose              Enable verbose output\n");
+    printf("  -p, --pin PIN              GPIO line number (default: 7)\n");
+    printf("  -o, --output FILE          Output filename (required)\n");
+    printf("  -c, --chip CHIP            GPIO chip name (default: gpiochip0)\n");
+    printf("\nExamples:\n");
+    printf("  piook -p 17 -o weather.txt\n");
+    printf("  piook --verbose --chip gpiochip1 -p 23 -o data.txt\n");
+    printf("  piook -o weather.txt  (use default pin 7)\n");
+    printf("\nNotes:\n");
+    printf(" * Must be called with privileges to access /dev/gpiochip* (usually root or gpio group).\n");
+    printf(" * piook will listen on the specified gpio line for valid OOK sequences from the cliMET weather station.\n");
+    printf(" * Valid sequences are decoded to a temperature in Centigrade, and a relative humidity (RH%%) value.\n");
+    printf(" * Decoded data is written to the output file in the format: temp,RH\n");
+    printf(" * Each update overwrites the previous file; the file will contain the most recent reading.\n");
+    printf(" * Project URL: http://github.com/colgreen/piook\n");
 }

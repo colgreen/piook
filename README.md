@@ -91,11 +91,19 @@ sudo make uninstall
 
 Usage:
 
-    piook gpioLine outfile
+    piook [OPTIONS]
 
-gpioLine: GPIO line number (kernel/BCM offset for gpiochip0) to listen on.
+Options:
+  -h, --help                 Show help message
+  -v, --verbose              Enable verbose output
+  -p, --pin PIN              GPIO line number (default: 7)
+  -o, --output FILE          Output filename (required)
+  -c, --chip CHIP            GPIO chip name (default: gpiochip0)
 
-outfile: filename to write data to.
+Examples:
+  piook -p 17 -o weather.txt
+  piook --verbose --chip gpiochip1 -p 23 -o data.txt
+  piook -o weather.txt  (use default pin 7)
 
 Notes:
  * Must be called with privileges to access /dev/gpiochip* (usually root or gpio group).
