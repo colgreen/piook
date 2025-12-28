@@ -229,7 +229,8 @@ void parseOptions(int argc, char *argv[])
  */
 void printHelp()
 {
-    printf("piook: Linux GPIO character-device (libgpiod) On-Off Keying Decoder for CliMET 433MHz weather station.\n");
+    printf("piook %s\n", PIOOK_VERSION);
+    printf("%s\n", PIOOK_DESCRIPTION);
     printf("\nUsage:\n");
     printf("  piook [OPTIONS]\n");
     printf("\nOptions:\n");

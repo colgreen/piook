@@ -8,6 +8,10 @@
 
 #include <stdint.h>
 
+/** Version information */
+#define PIOOK_VERSION "1.0.0"
+#define PIOOK_DESCRIPTION "Linux GPIO character-device (libgpiod) On-Off Keying Decoder for CliMET 433MHz weather station"
+
 /**
  * @enum PulseType
  * @brief Enumeration of different pulse types in the OOK signal.
