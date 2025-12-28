@@ -193,7 +193,7 @@ int decodePulse(int highLow, unsigned int duration)
 // Scan the buffered pulses for the fixed preamble sequence.
 int scanForPreamble()
 {
-    static int preambleSeq[PREAMBLE_LEN] = PREAMBLE_SEQ;
+    static const int preambleSeq[PREAMBLE_LEN] = PREAMBLE_SEQ;
 
     for(int i = 0; i < g_bitIndex - PREAMBLE_LEN; i++)
     {
