@@ -55,7 +55,6 @@ int main(int argc, char *argv[])
         if (gpiod_line_event_read(line, &event) == 0) {
             int highLow = (event.event_type == GPIOD_LINE_EVENT_RISING_EDGE) ? 1 : 0;
             unsigned long timeMicros = (unsigned long)event.ts.tv_sec * 1000000UL + (unsigned long)event.ts.tv_nsec / 1000UL;
-            printf("Event received: type=%d, highLow=%d, time=%lu\n", event.event_type, highLow, timeMicros);
             handleEvent(highLow, timeMicros);
         }
     }
@@ -254,7 +253,7 @@ void processSequence(int preambleIdx)
 /*
 * Function taken from Luc Small (http://lucsmall.com), itself
 * derived from the OneWire Arduino library. Modifications to
-* the polynomial according to Fine Offset's CRC8 calulations.
+* the polynomial according to Fine Offset's CRC8 calculations.
 */
 uint8_t crc8(uint8_t *addr, uint8_t len)
 {
