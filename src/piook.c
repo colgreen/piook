@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <getopt.h>
+#include <string.h>
 #include "piook.h"
 
 /** GPIO pin number to monitor (kernel/BCM offset for gpiochip0) */
