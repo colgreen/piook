@@ -105,7 +105,7 @@ void handleEvent(int highLow, unsigned long timeMicros)
         return;
     }
 
-    // All recorded 'off' pulses must be preceded by an 'on' pulse.
+    // Note. All recorded 'off' pulses must be preceded by an 'on' pulse.
     if(3 == prevPulse)
     {
         if(3 == code)
@@ -118,6 +118,7 @@ void handleEvent(int highLow, unsigned long timeMicros)
         if(_bitIdx >= __maxBits)
         {   // Pulse train is longer than expected. Reset buffer.
             _bitIdx = 0;
+            return;
         }
 
         // Buffer received bit.
