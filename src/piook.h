@@ -73,4 +73,4 @@ void handleEvent(int highLow, unsigned long timeMicros);
 enum PulseType decodePulse(int highLow, unsigned int duration);
 size_t scanForPreamble();
 void processSequence(size_t preambleIdx);
-uint8_t crc8(uint8_t *addr, uint8_t len);
+uint8_t crc8(const uint8_t *data, uint8_t len);
