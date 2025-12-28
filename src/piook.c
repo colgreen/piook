@@ -309,7 +309,7 @@ void printHelp()
     printf("\n");
     printf(" * Must be called with privileges to access /dev/gpiochip* (usually root or gpio group).\n\n");
     printf(" * piook will listen on the specified gpio line for valid OOK sequences from the cliMET weather station.\n\n");
-    printf(" * Valid sequences are decoded to a temperature in Centigrade, and a relative humidity (RH%) value.\n\n");
+    printf(" * Valid sequences are decoded to a temperature in Centigrade, and a relative humidity (RH%%) value.\n\n");
     printf(" * Decoded data is written to the output file in the format: temp,RH\n\n");
     printf(" * Each update overwrites the previous file; the file will contain the most recent reading.\n\n");
     printf(" * Project URL: http://github.com/colgreen/piook\n\n");
