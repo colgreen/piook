@@ -6,11 +6,11 @@ Raspberry Pi On-Off Keying (OOK) Decoder for the ClimeMET Weather Station, model
 piook is a small program for the [Raspberry Pi](https://en.wikipedia.org/wiki/Raspberry_Pi) computer that will decode radio transmissions from a ClimeMET weather station remote module, in conjunction with a cheap 433 MHz radio receiver module wired to one of the Raspberry Pi's GPIO pins.
 
 
-### CliMET Weather Station
+### ClimeMET Weather Station
 
-The [CliMET CM9088 Weather Station](https://www.climemet.com/products/cm9088-temperature-and-humidity-forecast-station) consists of two items; an indoor module with an LCD display, and a remote/outdoor module (part number [CM7-TX](https://www.climemet.com/products/cm7-tx-temperature-transmitter)) for mounting on an outside wall for taking readings of the external temperature and [relative humidity](https://en.wikipedia.org/wiki/Relative_humidity) (RH).
+The [ClimeMET CM9088 Weather Station](https://www.climemet.com/products/cm9088-temperature-and-humidity-forecast-station) consists of two items; an indoor module with an LCD display, and a remote/outdoor module (part number [CM7-TX](https://www.climemet.com/products/cm7-tx-temperature-transmitter)) for mounting on an outside wall for taking readings of the external temperature and [relative humidity](https://en.wikipedia.org/wiki/Relative_humidity) (RH).
 
-The remote module periodically (approximately per minute) transmits a short burst of data to the main module for indoor display of the external readings. Radio transmission occurs at 433 Mhz using [on-off keying](https://en.wikipedia.org/wiki/On-off_keying), a crude but simple data transmission scheme in which the transmitter is simply switched on and off very quickly with well defined off intervals defining the binary bits of the data sequence being transmitted.
+The remote module periodically (approximately per minute) transmits a short burst of data to the main module for indoor display of the external readings. Radio transmission occurs at 433 MHz using [on-off keying](https://en.wikipedia.org/wiki/On-off_keying), a crude but simple data transmission scheme in which the transmitter is simply switched on and off very quickly with well defined off intervals defining the binary bits of the data sequence being transmitted.
 
 
 ### 433 MHz Radio Receivers
