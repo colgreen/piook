@@ -158,15 +158,14 @@ How this program works is actually rather dumb and inefficient, but it does work
 
 The data line from the 433 MHz receiver module will receive random noise when no transmission is in progress, hence the voltage on the GPIO pin will usually be noise. When a transmission begins the voltage will follow the pattern of the on-off pulses.
 
-piook attaches an interrupt handler to the GPIO pin which executes upon each low-high or high-low voltage transition, hence when there is noise on the pin the interrupt handler is being constantly called, possibly thousands of times per second, certainly hundreds. The interrupt handler records the time since it was last called and this allows it to determine if the transition corresponds to a binary 0, 1, or noise. For 0's and 1's the bits are stored in a buffer until there are enough to pass to the decode subroutine.
-
-Not that in principle the code is not thread safe since the interrupt handler may (I'm not 100% sure) be called during an already running instance, and there is no attempt at thread syncing in that eventuality. 
-
+piook attaches an event handler to the GPIO pin, which executes upon each low-high or high-low voltage transition, hence when there is noise on the pin the event handler is being constantly called, possibly thousands of times per second, certainly hundreds. The event handler records the time since it was last called and this allows it to determine pulse durations and therefore if the transition corresponds to a binary 0, 1, or noise. For 0's and 1's the bits are stored in a buffer until there are enough to pass to the decode subroutine.
 
 
 ### Reverse Engineering the Data Modulation and Encoding
 
-Message format was determined partly from internet searching and partly from reverse engineering the received signals. A raw signal can be recorded and manually examined by attaching the data pin of the receiver to an audio line in of a PC and using audio recording software (I used [Audacity](http://www.audacityteam.org/) on Windows) to record the raw pulse trains. By comparing the pulse trains with the temperature and humidity readouts on the indoor modules we can gradually determine, firstly where the temp and RH data is located and with some effort, how those values are modulated and encoded. In order to determine how negative temperatures are encoded it was necessary to place the remote module in a freezer for a brief time. Similarly, the high end of the temperature range was tested by using an oven on a low heat.
+The message format was determined partly from internet searching and partly from reverse engineering the received signals. A raw signal can be recorded and manually examined by attaching the data pin of the receiver to an audio line-in of a PC and using audio recording software (I used [Audacity](http://www.audacityteam.org/) on Windows) to record the raw pulse trains.
+
+By comparing the pulse trains with the temperature and humidity readouts on the indoor modules we can gradually determine where the temp and RH data is located in the data sequence, and eventually, how those values are modulated and encoded. In order to determine how negative temperatures are encoded it was necessary to place the remote module in a freezer for a brief time. Similarly, the high end of the temperature range was tested by using an oven on a low heat.
 
 Notable resources:
 
